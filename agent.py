@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 from replay_buffer import ReplayBufferNumpy
 
+
 def huber_loss(y_true, y_pred, delta=1):
     """
     PyTorch implementation of Huber loss.
@@ -288,3 +289,23 @@ class Agent():
     def copy_weights_from_agent(self, agent_for_copy):
         # Adapt for PyTorch's way of copying weights
         pass
+
+
+
+class PolicyGradientAgent(DeepQLearningAgent):
+    
+    def __init__(self, board_size=10, frames=4, buffer_size=10000,
+                 gamma = 0.99, n_actions=3, use_target_net=False,
+                 version=''):
+       
+        pass
+
+    def _agent_model(self):
+     
+        pass
+
+    def train_agent(self, batch_size=32, beta=0.1, normalize_rewards=False,
+                    num_games=1, reward_clip=False):
+       
+        pass
+
