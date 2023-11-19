@@ -216,3 +216,75 @@ class Agent():
             point value corresponding to the row and col values
         """
         return row*self._board_size + col
+    
+    class DeepQLearningAgent(Agent):
+        """
+        This agent learns the game via Q learning.
+        Model outputs everywhere refer to Q values.
+        This class extends to the following classes:
+        - PolicyGradientAgent
+        - AdvantageActorCriticAgent
+        """
+
+    def __init__(self, board_size=10, frames=4, buffer_size=10000, gamma=0.99, n_actions=3, use_target_net=True, version=''):
+        # Initialization can remain mostly the same I think
+        super().__init__(board_size=board_size, frames=frames, buffer_size=buffer_size, gamma=gamma, n_actions=n_actions, use_target_net=use_target_net, version=version)
+        self.reset_models()
+
+    def reset_models(self):
+        # Needs to be changed for PyTorch model initialization
+        pass
+
+    def _prepare_input(self, board):
+        # Can remain the same I think
+        if board.ndim == 3:
+            board = board.reshape((1,) + self._input_shape)
+        return self._normalize_board(board.copy())
+
+    def _get_model_outputs(self, board, model=None):
+        # Needs adaptation for PyTorch model inference
+        pass
+
+    def _normalize_board(self, board):
+        # No change needed unless it involves TensorFlow-specific operations
+        return board.astype(np.float32) / 4.0
+
+    def move(self, board, legal_moves, value=None):
+        # Adapt for PyTorch, particularly the model output processing
+        pass
+
+    def _agent_model(self):
+        # Needs complete rewrite in PyTorch
+        pass
+
+    def set_weights_trainable(self):
+        # Adapt for PyTorch's way of handling trainable weights
+        pass
+
+    def get_action_proba(self, board, values=None):
+        # Adapt for PyTorch, especially the model output manipulation
+        pass
+
+    def save_model(self, file_path='', iteration=None):
+        # Adapt for saving models in PyTorch format
+        pass
+
+    def load_model(self, file_path='', iteration=None):
+        # Adapt for loading models in PyTorch format
+        pass
+
+    def train_agent(self, batch_size=32, num_games=1, reward_clip=False):
+        # Significant changes needed for training in PyTorch
+        pass
+
+    def update_target_net(self):
+        # Adapt for PyTorch's way of copying weights
+        pass
+
+    def compare_weights(self):
+        # Change to compare weights in PyTorch models
+        pass
+
+    def copy_weights_from_agent(self, agent_for_copy):
+        # Adapt for PyTorch's way of copying weights
+        pass
