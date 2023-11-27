@@ -73,41 +73,45 @@ class Agent():
 class DeepQLearningAgent(Agent):
     def __init__(self, board_size=10, frames=4, buffer_size=10000,
                  gamma=0.99, n_actions=3, use_target_net=True,
-                 version='', input_channels=2):  # Standardverdi er satt til 2
+                 version='', input_channels=2):
         Agent.__init__(self, board_size=board_size, frames=frames, buffer_size=buffer_size,
                  gamma=gamma, n_actions=n_actions, use_target_net=use_target_net,
                  version=version)
-        self.input_channels = input_channels  # Lagre input_channels som en instansvariabel
+        self.input_channels = input_channels
         self.reset_models()
 
 
     def reset_models(self):
-        self._model, self._optimizer = self._agent_model()  # Opprett modellen og optimizer
+        self._model, self._optimizer = self._agent_model()
         if self._use_target_net:
-            self._target_net, _ = self._agent_model()  # Opprett målmodellen (bruk _ for å ignorere optimizer)
+            self._target_net, _ = self._agent_model()
             self.update_target_net()
 
 
     def _prepare_input(self, board):
+        print(f"Original board shape: {board.shape}")
         if board.ndim == 3:
             board = board.reshape((1,) + self._input_shape)
         board = self._normalize_board(board.copy())
+        print(f"Prepared board shape: {board.shape}")
         return board.copy()
 
     def _get_model_outputs(self, board, model=None):
+        print(f"Input to model: {board.shape}")
         board = self._prepare_input(board)
         if model is None:
             model = self._model
         model_outputs = model(torch.tensor(board, dtype=torch.float32))
+        print(f"Model output: {model_outputs.shape}")
         return model_outputs.detach().numpy()
 
     def _normalize_board(self, board):
         return board.astype(np.float32) / 4.0
 
     def move(self, board, legal_moves, value=None):
-        
+        print(f"Board shape before transpose: {board.shape}")
         board = board.transpose((0, 3, 1, 2))
-        
+        print(f"Board shape after transpose: {board.shape}")
         model_outputs = self._get_model_outputs(board, self._model)
         
        
@@ -121,22 +125,27 @@ class DeepQLearningAgent(Agent):
         input_dim = self._board_size
         hidden_units = 64
 
+        # Dummy input for testing
+        sample_input = torch.rand(1, input_channels, input_dim, input_dim)
+
         model = nn.Sequential(
             nn.Conv2d(input_channels, 16, kernel_size=4, stride=1),
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=4, stride=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(32 * (input_dim - 8) * (input_dim - 8), hidden_units),
+            nn.Linear(32 * 4 * 4, hidden_units),
             nn.ReLU(),
             nn.Linear(hidden_units, self._n_actions)
         )
+
+       
 
         optimizer = optim.RMSprop(model.parameters(), lr=0.0005)
         return model, optimizer
 
 
-
+    
 
 
     def set_weights_trainable(self):
@@ -218,9 +227,9 @@ class PolicyGradientAgent(DeepQLearningAgent):
             nn.Linear(hidden_units, self._n_actions)
         )
 
-        optimizer = optim.RMSprop(model.parameters(), lr=0.0005)  # Legg til denne linjen for å opprette en optimizer
+        
 
-        return model, optimizer
+        return model
 
 
 
@@ -229,25 +238,31 @@ class PolicyGradientAgent(DeepQLearningAgent):
         s, a, r, _, _, _ = self._buffer.sample(self._buffer.get_current_size())
         if normalize_rewards:
             r = (r - np.mean(r)) / (np.std(r) + 1e-8)
-        target = np.multiply(a, r)
+        
         
         # Convert to PyTorch tensors
         s = torch.Tensor(s).to(self.device)
         a = torch.Tensor(a).to(self.device)
-        target = torch.Tensor(target).to(self.device)
+        r = torch.tensor(r, dtype=torch.float32)
 
         # Calculate loss
         logits = self._model(s)
         action_probabilities = nn.functional.softmax(logits, dim=1)
         selected_action_probabilities = torch.sum(action_probabilities * a, dim=1)
         
-        loss = -torch.mean(torch.log(selected_action_probabilities + 1e-8) * target)
+        # Calculate the policy gradient loss
+        pg_loss = -torch.mean(torch.log(selected_action_probabilities + 1e-8) * r)
         
-        # Update model weights
+        # Calculate entropy to encourage exploration
+        entropy = -torch.mean(torch.sum(action_probabilities * torch.log(action_probabilities + 1e-8), dim=1))
+        
+        # Total loss combines policy gradient loss and entropy regularization
+        loss = pg_loss - beta * entropy
+
         self.actor_optimizer.zero_grad()
         loss.backward()
         self.actor_optimizer.step()
-        
+
         return loss.item()
     
 
