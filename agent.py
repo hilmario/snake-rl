@@ -182,16 +182,41 @@ class DeepQLearningAgent(Agent):
             self._target_net.load_state_dict(torch.load("{}/model_{:04d}_target.pt".format(file_path, iteration)))
 
     def train_agent(self, batch_size=32, num_games=1, reward_clip=False):
+        states, actions, rewards, next_states, dones, legal_moves = self.buffer.sample(batch_size)
+
+        states = torch.tensor(states, dtype=torch.float32)
+        next_states = torch.tensor(next_states, dtype=torch.float32)
+        actions = torch.tensor(actions, dtype=torch.long)
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        dones = torch.tensor(dones, dtype=torch.float32)
+
+        if reward_clip:
+            rewards = torch.sign(rewards)
+
+        current_q_values = self.model(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+        next_q_values = self._target_net(next_states).max(1)[0]
+        expected_q_values = rewards + self._gamma * next_q_values * (1 - dones)
+
+        loss = mean_huber_loss(current_q_values, expected_q_values)
+
+        self._optimizer.zero_grad()
+        loss.backward()
+        self._optimizer.step()
+
+        return loss.item()
         
-        pass
 
     def update_target_net(self):
         if self._use_target_net:
             self._target_net.load_state_dict(self._model.state_dict())
 
     def compare_weights(self):
+        for model_param, target_param in zip(self.model.parameters(), self._target_net.parameters()):
+            if torch.equal(model_param, target_param):
+                print("Weights match")
+            else:
+                print("Weights do not match")
         
-        pass
 
     def copy_weights_from_agent(self, agent_for_copy):
         assert isinstance(agent_for_copy, self), "Agent type is required for copy"
