@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from replay_buffer import ReplayBuffer
 import numpy as np
+import pickle
 
 class DQN(nn.Module):
     def __init__(self, input_shape, n_actions):
@@ -56,99 +57,192 @@ class DeepQLearningAgent(nn.Module):
         return DQN(self.input_shape, self.n_actions)
 
     def _update_target_model(self):
-        # Oppdaterer målnettverket med vekter fra hovedmodellen
+        # Updates the target network with weights from the main model
         if self.use_target_net:
             self.target_model.load_state_dict(self.model.state_dict())
 
 
     def _prepare_input(self, board):
-        # Reshape input data if needed
+        # Check if board is a single game state or a batch of game states
         if board.ndim == 3:
+            # Add a batch dimension if it is a single game state 
             board = np.expand_dims(board, axis=0)
-        
-        # Normalize the board data
-        board = self._normalize_board(board.copy())  # Implement _normalize_board function
-        
-        # Convert the board data to PyTorch tensor
-        board = torch.tensor(board, dtype=torch.float32)
-        
-        return board
+
+        # Normalize the board
+        board = self._normalize_board(board)
+
+        # Convert numpy array to PyTorch tensor
+        board_tensor = torch.tensor(board, dtype=torch.float32)
+
+        # Reformat tensor if necessary (eg change dimension order)
+        # PyTorch expects (batch, channels, height, width)
+        board_tensor = board_tensor.permute(0, 3, 1, 2)
+
+        return board_tensor
+
 
     def _normalize_board(self, board):
-        # Normalize the board state before input to the network
-        pass
+        # Assume that the values ​​in board are between 0 and a maximum number (e.g. 4)
+        # Normaliser dem til et område mellom 0 og 1
+        board_normalized = board / 4.0
+
+        return board_normalized
 
     def reset_buffer(self, buffer_size=None):
-        # Reset or initialize the replay buffer
-        pass
+        if buffer_size is not None:
+            self._buffer_size = buffer_size
+        self.buffer = ReplayBuffer(self._buffer_size, self.board_size, self.n_frames, self.n_actions)
 
     def get_buffer_size(self):
-        # Get the current size of the buffer
-        pass
+        return len(self.buffer)
 
     def add_to_buffer(self, board, action, reward, next_board, done, legal_moves):
-        # Add current game step to the replay buffer
-        pass
+        self.buffer.add(board, action, reward, next_board, done, legal_moves)
 
     def save_buffer(self, file_path='', iteration=None):
-        # Save the buffer to disk
-        pass
+        # Determine file name based on file path and iteration
+        file_name = f"{file_path}/buffer"
+        if iteration is not None:
+            file_name += f"_{iteration:04d}"
+        file_name += ".pkl"
+
+        # Save the buffer to disk using pickle
+        with open(file_name, 'wb') as file:
+            pickle.dump(self.buffer, file)
 
     def load_buffer(self, file_path='', iteration=None):
-        # Load the buffer from disk
-        pass
+        # Determine file name based on file path and iteration
+        file_name = f"{file_path}/buffer"
+        if iteration is not None:
+            file_name += f"_{iteration:04d}"
+        file_name += ".pkl"
+
+        # Load the buffer from disk using pickle
+        with open(file_name, 'rb') as file:
+            self.buffer = pickle.load(file)
 
     def train_agent(self, batch_size=32, num_games=1, reward_clip=False):
-        # Implement the training logic for the agent
-        pass
+        for _ in range(num_games):
+            # Sample experiences from the buffer
+            states, actions, rewards, next_states, dones, legal_moves = self.buffer.sample(batch_size)
+
+            # If reward_clipping is enabled, clip the rewards
+            if reward_clip:
+                rewards = np.clip(rewards, -1, 1)
+
+            # Calculate expected Q values ​​for next states
+            # Use the target network for stability if available
+            target_network = self.target_model if self.use_target_net else self.model
+            next_q_values = target_network.predict(next_states)
+
+            # Calculate target Q values
+            max_next_q_values = np.max(next_q_values, axis=1)
+            target_q_values = rewards + (self.gamma * max_next_q_values * (1 - dones))
+
+            # Update the model using calculated Q values
+            self.optimizer.zero_grad()
+            current_q_values = self.model(states).gather(1, actions.unsqueeze(-1)).squeeze(-1)
+            loss = F.mse_loss(current_q_values, target_q_values)
+            loss.backward()
+            self.optimizer.step()
+
+            # Periodically refresh the target network
+            if self.use_target_net:
+                self._update_target_model()
+        
 
     def save_model(self, file_path='', iteration=None):
-        # Save the current models to disk
-        pass
+        model_file = f"{file_path}/model"
+        if iteration is not None:
+            model_file += f"_{iteration:04d}"
+        model_file += ".pth"
+
+        torch.save(self.model.state_dict(), model_file)
+        if self.use_target_net:
+            target_model_file = f"{file_path}/target_model_{iteration:04d}.pth"
+            torch.save(self.target_model.state_dict(), target_model_file)
 
     def load_model(self, file_path='', iteration=None):
-        # Load models from disk
-        pass
+        model_file = f"{file_path}/model"
+        if iteration is not None:
+            model_file += f"_{iteration:04d}"
+        model_file += ".pth"
+
+        self.model.load_state_dict(torch.load(model_file))
+        if self.use_target_net:
+            target_model_file = f"{file_path}/target_model_{iteration:04d}.pth"
+            self.target_model.load_state_dict(torch.load(target_model_file))
 
     def print_models(self):
-        # Print the current models using summary method
-        pass
+        print("Mainmodel:")
+        print(self.model)
+        if self.use_target_net:
+            print("\nTargetnetwork:")
+            print(self.target_model)
 
     def set_weights_trainable(self):
-        # Set selected layers to non-trainable and compile the model
-        pass
+        # Set all teams except the last two to non-trainable
+        for layer in list(self.model.children())[:-2]:
+            for param in layer.parameters():
+                param.requires_grad = False
 
     def update_target_net(self):
-        # Update the weights of the target network
-        pass
+        # Copy weights from the main model to the target network
+        self.target_model.load_state_dict(self.model.state_dict())
 
     def compare_weights(self):
-        # Check if the model and target network have the same weights
-        pass
+        for param_main, param_target in zip(self.model.parameters(), self.target_model.parameters()):
+            if param_main.data.ne(param_target.data).sum() > 0:
+                return False
+        return True
 
     def move(self, board, legal_moves, value=None):
-        # Decide the action with maximum Q value
-        pass
+        # Prepare inputs for the model
+        board_tensor = self._prepare_input(board)
+        
+        # Get Q values ​​from the model
+        q_values = self.model(board_tensor)
+
+        # Masks illegal moves
+        masked_q_values = q_values + (legal_moves - 1) * 1e9  # large negative value for illegal moves
+
+        # Choose the action with the maximum Q value
+        action = torch.argmax(masked_q_values, dim=1)
+        
+        return action
 
     def get_action_proba(self, board, values=None):
-        # Returns the action probability values using the model
-        pass
+        # Prepare inputs for the model
+        board_tensor = self._prepare_input(board)
 
-    def _point_to_row_col(self, point):
-        # Convert a point value to row, col value
-        pass
+        # Get Q values ​​from the model
+        q_values = self.model(board_tensor)
 
-    def _row_col_to_point(self, row, col):
-        # Convert a (row, col) to point value
-        pass
+        # Use Softmax to convert Q values ​​to probabilities
+        action_probabilities = F.softmax(q_values, dim=1)
+        
+        return action_probabilities
+
+    def _point_to_row_col(self, point, board_size):
+        row = point // board_size
+        col = point % board_size
+        return row, col
+
+    def _row_col_to_point(self, row, col, board_size):
+        return row * board_size + col
 
     def copy_weights_from_agent(self, agent_for_copy):
-        # Update weights between agents
-        pass
+        self.model.load_state_dict(agent_for_copy.model.state_dict())
+        if self.use_target_net:
+            self.target_model.load_state_dict(agent_for_copy.target_model.state_dict())
 
     def reset_models(self):
-        # Reset or recreate the models
-        pass
+        # Restore the main model
+        self.model = self._build_model()
 
+        # Restore the target network if used
+        if self.use_target_net:
+            self.target_model = self._build_model()
+            self._update_target_net()
 
 

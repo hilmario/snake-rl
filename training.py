@@ -36,6 +36,7 @@ log_frequency = 500
 games_eval = 8
 
 # setup the agent
+print(DeepQLearningAgent)
 agent = DeepQLearningAgent(board_size=board_size, frames=frames, n_actions=n_actions, 
                            buffer_size=buffer_size, version=version)
 # agent = PolicyGradientAgent(board_size=board_size, frames=frames, n_actions=n_actions, 
