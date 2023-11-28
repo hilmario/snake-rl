@@ -199,7 +199,6 @@ class DeepQLearningAgent(Agent):
 
     def train_agent(self, batch_size=32, num_games=1, reward_clip=False):
         self._model.train()  # Set the model to training mode
-        self._model.train()  # Set the model to training mode
         s, a, r, next_s, done, legal_moves = self._buffer.sample(batch_size)
 
         if reward_clip:
