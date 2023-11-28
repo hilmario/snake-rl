@@ -8,17 +8,13 @@ from collections import deque
 
 
 def huber_loss(y_true, y_pred, delta=1):
-    error = y_true.unsqueeze(2) - y_pred
-    print(f"error shape before subtraction: {error.shape}")
-    quad_error = 0.5 * error.pow(2)
-    lin_error = delta * (error.abs() - 0.5 * delta)
-    return torch.where(error.abs() < delta, quad_error, lin_error)
+    error = y_true - y_pred
+    is_small_error = torch.abs(error) < delta
+    squared_loss = torch.square(error) / 2
+    linear_loss = delta * (torch.abs(error) - 0.5 * delta)
+    return torch.where(is_small_error, squared_loss, linear_loss)
 
 def mean_huber_loss(y_true, y_pred, delta=1):
-    print(f"y_true shape: {y_true.shape}")
-    print(f"y_pred shape before unsqueeze: {y_pred.shape}")
-    y_pred = y_pred.squeeze()
-    print(f"y_pred shape after unsqueeze: {y_pred.shape}")
     return huber_loss(y_true, y_pred, delta).mean()
 
 
@@ -73,6 +69,24 @@ class Agent():
     def _row_col_to_point(self, row, col):
         return row*self._board_size + col
     
+class DQN(nn.Module):
+    def __init__(self, input_shape, n_actions):
+        super(DQN, self).__init__()
+        self.conv1 = nn.Conv2d(input_shape[0], 16, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.flatten =nn.Flatten()
+        self.fc1 = nn.Linear(64 * input_shape[1] * input_shape[2], 64)
+        self.fc2 = nn.Linear(64, n_actions)
+
+    def forward(self, x):
+        x = torch.relu(self.conv1(x))
+        x = torch.relu(self.conv2(x))
+        x = torch.relu(self.conv3(x))
+        x = self.flatten(x)
+        x = torch.relu(self.fc1(x))
+        return self.fc2(x)
+    
 
 
 class DeepQLearningAgent(Agent):
@@ -94,71 +108,55 @@ class DeepQLearningAgent(Agent):
 
 
     def _prepare_input(self, board):
-        print(f"Original board shape: {board.shape}")
         
-        # Check if it's necessary to add a batch dimension
-        if board.ndim == 3:
-            board = board.reshape((1,) + self._input_shape)
-        
-        # Normalize the board data
-        board = self._normalize_board(board.copy())
-        
-        # Transpose the dimensions to match the format (batch_size, channels, height, width)
-        board = board.transpose(0, 3, 1, 2)
+        if isinstance(board, np.ndarray):
+            board = torch.tensor(board, d=type.float32)
 
-        # Reduce the number of channels to 2
-        board = board[:, :2, :, :]
-        
-        print(f"Prepared board shape: {board.shape}")
+        if board.ndim ==3:
+            board = board.unsqueeze(0)
+
+        board = self._normalize_board(board) # normalize
+        board = board.permute(0, 3, 1, 2) # change to (batch, channels, height, width)
+        expected_channels = 10
+        if board.size(1) != expected_channels:
+            raise ValueError(f"input 'board' has {board.size(1)} channels, but {expected_channels} channels are expected.")
+
         return board
 
     def _get_model_outputs(self, board, model=None):
-        print(f"Input to model: {board.shape}")
-        board = self._prepare_input(board)
+
+        board = self._prepare_input(board)  # Prepare board
+
         if model is None:
             model = self._model
-        model_outputs = model(torch.tensor(board, dtype=torch.float32))
-        print(f"Model output: {model_outputs.shape}")
-        return model_outputs.detach().numpy()
+
+        with torch.no_grad():
+            model_outputs = model(board)  # Get model predictions
+
+        return model_outputs.cpu().numpy()
+   
 
     def _normalize_board(self, board):
-        return board.astype(np.float32) / 4.0
+        return board/4.0
+
 
     def move(self, board, legal_moves, value=None):
-        print(f"Board shape before transpose: {board.shape}")
-        board = board.transpose((0, 3, 1, 2))
-        print(f"Board shape after transpose: {board.shape}")
         model_outputs = self._get_model_outputs(board, self._model)
+        legal_moves = torch.tensor(legal_moves).unsqueeze(0) if legal_moves.ndim == 1 else torch.tensor(legal_moves)
+        return torch.argmax(torch.where(legal_moves == 1, torch.tensor(model_outputs), torch.tensor(-np.inf)), axis=1).numpy()
         
-       
-        legal_moves = legal_moves.reshape((legal_moves.shape[0], -1))
-    
-        return np.argmax(np.where(legal_moves == 1, model_outputs, -np.inf), axis=1)
+        
 
 
-    def _agent_model(self, input_channels=2):  
-  
-        input_dim = self._board_size
-        hidden_units = 64
-
-        # Dummy input for testing
-        sample_input = torch.rand(1, input_channels, input_dim, input_dim)
-
-        model = nn.Sequential(
-            nn.Conv2d(input_channels, 16, kernel_size=4, stride=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, kernel_size=4, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(32 * 4 * 4, hidden_units),
-            nn.ReLU(),
-            nn.Linear(hidden_units, self._n_actions)
-        )
-
-       
-
+    def _agent_model(self):
+        input_channels = 10
+        input_height = self._board_size
+        input_width = self._board_size
+        model = DQN(input_shape=(input_channels, input_height, input_width), n_actions= self._n_actions)
         optimizer = optim.RMSprop(model.parameters(), lr=0.0005)
+        
         return model, optimizer
+    
 
 
     
