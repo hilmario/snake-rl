@@ -8,12 +8,17 @@ from collections import deque
 
 
 def huber_loss(y_true, y_pred, delta=1):
-    error = y_true - y_pred
+    error = y_true.unsqueeze(2) - y_pred
+    print(f"error shape before subtraction: {error.shape}")
     quad_error = 0.5 * error.pow(2)
     lin_error = delta * (error.abs() - 0.5 * delta)
     return torch.where(error.abs() < delta, quad_error, lin_error)
 
 def mean_huber_loss(y_true, y_pred, delta=1):
+    print(f"y_true shape: {y_true.shape}")
+    print(f"y_pred shape before unsqueeze: {y_pred.shape}")
+    y_pred = y_pred.squeeze()
+    print(f"y_pred shape after unsqueeze: {y_pred.shape}")
     return huber_loss(y_true, y_pred, delta).mean()
 
 
@@ -90,11 +95,22 @@ class DeepQLearningAgent(Agent):
 
     def _prepare_input(self, board):
         print(f"Original board shape: {board.shape}")
+        
+        # Check if it's necessary to add a batch dimension
         if board.ndim == 3:
             board = board.reshape((1,) + self._input_shape)
+        
+        # Normalize the board data
         board = self._normalize_board(board.copy())
+        
+        # Transpose the dimensions to match the format (batch_size, channels, height, width)
+        board = board.transpose(0, 3, 1, 2)
+
+        # Reduce the number of channels to 2
+        board = board[:, :2, :, :]
+        
         print(f"Prepared board shape: {board.shape}")
-        return board.copy()
+        return board
 
     def _get_model_outputs(self, board, model=None):
         print(f"Input to model: {board.shape}")
@@ -182,28 +198,36 @@ class DeepQLearningAgent(Agent):
             self._target_net.load_state_dict(torch.load("{}/model_{:04d}_target.pt".format(file_path, iteration)))
 
     def train_agent(self, batch_size=32, num_games=1, reward_clip=False):
-        states, actions, rewards, next_states, dones, legal_moves = self.buffer.sample(batch_size)
-
-        states = torch.tensor(states, dtype=torch.float32)
-        next_states = torch.tensor(next_states, dtype=torch.float32)
-        actions = torch.tensor(actions, dtype=torch.long)
-        rewards = torch.tensor(rewards, dtype=torch.float32)
-        dones = torch.tensor(dones, dtype=torch.float32)
+        self._model.train()  # Set the model to training mode
+        self._model.train()  # Set the model to training mode
+        s, a, r, next_s, done, legal_moves = self._buffer.sample(batch_size)
 
         if reward_clip:
-            rewards = torch.sign(rewards)
+            r = np.sign(r)
 
-        current_q_values = self.model(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-        next_q_values = self._target_net(next_states).max(1)[0]
-        expected_q_values = rewards + self._gamma * next_q_values * (1 - dones)
+        # Convert to PyTorch tensors
+        s = torch.tensor(s, dtype=torch.float32)
+        a = torch.tensor(a, dtype=torch.long)
+        r = torch.tensor(r, dtype=torch.float32)
+        next_s = torch.tensor(next_s, dtype=torch.float32)
+        done = torch.tensor(done, dtype=torch.float32)
 
+        # Get current Q values
+        current_q_values = self._model(s).gather(1, a.unsqueeze(1)).squeeze(1)
+
+        # Compute the expected Q values
+        next_q_values = self._target_net(next_s).max(1)[0]
+        expected_q_values = r + self._gamma * next_q_values * (1 - done)
+
+        # Compute Huber loss
         loss = mean_huber_loss(current_q_values, expected_q_values)
 
+        # Optimize the model
         self._optimizer.zero_grad()
         loss.backward()
         self._optimizer.step()
 
-        return loss.item()
+        return loss.item()       
         
 
     def update_target_net(self):
