@@ -68,7 +68,7 @@ class DQN(nn.Module):
         return total_size
     
 class DeepQLearningAgent(nn.Module):
-    def __init__(self, board_size, frames, n_actions, gamma=0.99, buffer_size=10000, use_target_net=True, model_config=None,version=None):
+    def __init__(self, board_size, frames, n_actions, gamma=0.99, buffer_size=1000, use_target_net=True, model_config=None,version=None):
         super(DeepQLearningAgent, self).__init__()
         
         self.board_size = board_size
@@ -86,7 +86,7 @@ class DeepQLearningAgent(nn.Module):
             self.target_model = self._build_model(version)
             self._update_target_model()
 
-        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=0.1)
+        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=0.0005)
 
         # Add this line to create self.device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
