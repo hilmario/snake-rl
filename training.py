@@ -96,7 +96,7 @@ for index in tqdm(range(episodes)):
                        sample_actions=sample_actions, reward_type=reward_type,
                        frame_mode=True, total_frames=n_games_training, 
                        stateful=True)
-    loss = agent.train_agent(batch_size=64,num_games=n_games_training, reward_clip=True)
+    loss = agent.train_agent(batch_size=32,num_games=n_games_training, reward_clip=True)
 
     # check performance every once in a while
     if((index+1)%log_frequency == 0):

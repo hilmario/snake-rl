@@ -5,6 +5,17 @@ from replay_buffer import ReplayBufferNumpy
 import numpy as np
 import pickle
 
+# GPU availability check
+if torch.cuda.is_available():
+    print("CUDA (GPU support) is available!")
+    print(f"Number of available GPUs: {torch.cuda.device_count()}")
+    for i in range(torch.cuda.device_count()):
+        print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+else:
+    print("CUDA is not available. Running on CPU.")
+
+
+
 class DQN(nn.Module):
     def __init__(self, input_shape, n_actions, num_input_channels=2):
         super(DQN, self).__init__()
@@ -13,22 +24,24 @@ class DQN(nn.Module):
         
         # Convolutional layers with relu activation
         self.conv = nn.Sequential(
-            nn.Conv2d(num_input_channels, 16, kernel_size=3, padding=1),
+            nn.Conv2d(num_input_channels, 16, kernel_size=(3,3), padding='same'),
             nn.ReLU(),
-           
+            nn.Conv2d(16, 32, kernel_size=(3, 3)),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=(5, 5)),
+            nn.ReLU()
         )
-
         
-        in_features = 16 * input_shape[0] * input_shape[1]
+        # Calculate the size of the tensor after the conv layers
+        self.in_features = self._calculate_conv_output_size(input_shape, num_input_channels)
+        
         
         # Dense layers
         self.fc = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(in_features, 256),
+            nn.Linear(self.in_features, 64),
             nn.ReLU(),
-            nn.Linear(256,256),
-            nn.ReLU(),
-            nn.Linear(256, n_actions)
+            nn.Linear(64, n_actions)
         )
 
     def forward(self, x):
@@ -38,7 +51,7 @@ class DQN(nn.Module):
         x = x.reshape(x.size(0), -1)
         #print("Shape before fully connected layers:", x.shape)
         x = self.fc(x)
-        #pr("Shape after fully connected layers:", x.shape)
+        #print("Shape after fully connected layers:", x.shape)
         return x
     
     def predict(self, state):
@@ -73,7 +86,7 @@ class DeepQLearningAgent(nn.Module):
             self.target_model = self._build_model(version)
             self._update_target_model()
 
-        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=0.0005)
+        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=0.1)
 
         # Add this line to create self.device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -172,8 +185,11 @@ class DeepQLearningAgent(nn.Module):
 
             
             with torch.no_grad():
-                max_next_Q_values = self.model(next_states).max(1)[0]
-                expected_Q_values = rewards + (self.gamma * max_next_Q_values * (1 - dones))
+                max_next_Q_values = self.model(next_states).max(1)[0].unsqueeze(-1)
+                expected_Q_values = rewards + (self.gamma * max_next_Q_values * (1 - dones)).squeeze()
+
+            #print("Current Q values shape:", current_Q_values.shape)
+            #print("Expected Q values shape:", expected_Q_values.shape)
 
             
             loss = loss_fn(current_Q_values, expected_Q_values.detach())
@@ -248,7 +264,7 @@ class DeepQLearningAgent(nn.Module):
         q_values = self.model(board_tensor)
 
         # Masks illegal moves
-        masked_q_values = q_values.detach + (legal_moves - 1) * 1e9  # large negative value for illegal moves
+        masked_q_values = q_values.detach() + (legal_moves - 1) * 1e9  # large negative value for illegal moves
 
         # Choose the action with the maximum Q value
         action = torch.argmax(masked_q_values, dim=1)
