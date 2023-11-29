@@ -3,7 +3,7 @@ script for training the agent for snake using various methods
 '''
 # run on cpu
 import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+#os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 import numpy as np
 from tqdm import tqdm

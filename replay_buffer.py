@@ -50,6 +50,7 @@ class ReplayBuffer:
         done : int
             Binary indicator for game termination
         """
+        
         self._buffer.append([s, a, r, next_s, done])
 
     def get_current_size(self):
@@ -111,6 +112,7 @@ class ReplayBuffer:
             r.append(x[2])
             next_s.append(x[3])
             done.append(x[4])
+            
         s = np.array(s)
         a1 = np.array(a1).reshape(-1)
         # convert action to one hot encoded format
