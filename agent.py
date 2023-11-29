@@ -161,7 +161,7 @@ class DeepQLearningAgent(nn.Module):
 
     def train_agent(self, batch_size=32, num_games=1, reward_clip=False):
         total_loss = 0.0
-        loss_fn = nn.MSELoss()
+        loss_fn = nn.SmoothL1Loss()
         
         for _ in range(num_games):
             states, actions, rewards, next_states, dones, legal_moves = self.buffer.sample(batch_size)
