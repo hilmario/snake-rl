@@ -15,12 +15,11 @@ else:
     print("CUDA is not available. Running on CPU.")
 
 
-
+# Define the Deep Q-Network (DQN) class
 class DQN(nn.Module):
     def __init__(self, input_shape, n_actions, num_input_channels=2):
         super(DQN, self).__init__()
 
-        
         
         # Convolutional layers with relu activation
         self.conv = nn.Sequential(
@@ -45,13 +44,13 @@ class DQN(nn.Module):
         )
 
     def forward(self, x):
-        #print("Initial shape in forward:", x.shape)
+        # Pass the input 'x' through the convolutional layers
         x = self.conv(x)
-        #print("Shape after convolutional layers:", x.shape)
+        # Reshape the output tensor to prepare it for the fully connected layers
         x = x.reshape(x.size(0), -1)
-        #print("Shape before fully connected layers:", x.shape)
+        # Pass the reshaped tensor through the fully connected layers
         x = self.fc(x)
-        #print("Shape after fully connected layers:", x.shape)
+        
         return x
     
     def predict(self, state):
@@ -66,7 +65,8 @@ class DQN(nn.Module):
         test_tensor = self.conv(test_tensor)
         total_size = test_tensor.size(1) * test_tensor.size(2) * test_tensor.size(3)
         return total_size
-    
+
+# Define the DeepQLearningAgent class    
 class DeepQLearningAgent(nn.Module):
     def __init__(self, board_size, frames, n_actions, gamma=0.99, buffer_size=1000, use_target_net=True, model_config=None,version=None):
         super(DeepQLearningAgent, self).__init__()
@@ -116,25 +116,27 @@ class DeepQLearningAgent(nn.Module):
         # PyTorch expects (batch, channels, height, width)
         board_tensor = board_tensor.permute(0, 3, 1, 2)
 
-        #print("Shape after _prepare_input:", board_tensor.shape)
 
         return board_tensor
 
 
     def _normalize_board(self, board):
-        # Assume that the values ​​in board are between 0 and a maximum number (e.g. 4)
-        # Normaliser dem til et område mellom 0 og 1
+        # Normalize them to a range between 0 and 1
         return board.astype(np.float32) / 4.0
 
     def reset_buffer(self, buffer_size=None):
+        # Reset the replay buffer with a new buffer size if provided
         if buffer_size is not None:
             self._buffer_size = buffer_size
+        # Create a new replay buffer with the updated buffer size and other parameters   
         self.buffer = ReplayBufferNumpy(self._buffer_size, self.board_size, self.n_frames, self.n_actions)
 
     def get_buffer_size(self):
+        # Get the current size of the replay buffer
         return len(self.buffer)
 
     def add_to_buffer(self, board, action, reward, next_board, done, legal_moves):
+        # Add a new experience tuple to the replay buffer
         self.buffer.add_to_buffer(board, action, reward, next_board, done, legal_moves)
 
     def save_buffer(self, file_path='', iteration=None):
@@ -160,82 +162,115 @@ class DeepQLearningAgent(nn.Module):
             self.buffer = pickle.load(file)
 
     def train_agent(self, batch_size=32, num_games=1, reward_clip=False):
+        # Initialize the total loss to zero
         total_loss = 0.0
+        
+        # Define the loss function (Smooth L1 Loss)
         loss_fn = nn.SmoothL1Loss()
         
+         # Iterate over a specified number of games for training
         for _ in range(num_games):
+            # Sample experiences (states, actions, rewards, next_states, dones, legal_moves) from the replay buffer
             states, actions, rewards, next_states, dones, legal_moves = self.buffer.sample(batch_size)
 
+            # Check if states and next_states need to be squeezed to match shapes
             if states.shape != next_states.shape:
                 states = torch.squeeze(states, dim=1)
                 next_states = torch.squeeze(next_states, dim=1)
 
-            
+            # Convert numpy arrays to PyTorch tensors and reshape them
             states = torch.from_numpy(states).float().permute(0, 3, 1, 2).to(self.device)
             next_states = torch.from_numpy(next_states).float().permute(0, 3, 1, 2).to(self.device)
             rewards = torch.from_numpy(rewards).float().to(self.device)
             dones = torch.from_numpy(dones).float().to(self.device)
 
-            
+            # Clip rewards to be either -1, 0, or 1
+            if reward_clip:
+                rewards = torch.sign(rewards)
+
+            # Convert actions to PyTorch tensors and choose the actions with the maximum Q values
             actions = torch.from_numpy(actions).to(self.device)
             actions = torch.argmax(actions, axis=1).unsqueeze(-1)
 
-            
+            # Compute the Q values of the current states for the chosen actions
             current_Q_values = self.model(states).gather(1, actions).squeeze(-1)
 
-            
+            # Compute the maximum Q values of the next states without gradients
             with torch.no_grad():
-                max_next_Q_values = self.model(next_states).max(1)[0].unsqueeze(-1)
-                expected_Q_values = rewards + (self.gamma * max_next_Q_values * (1 - dones)).squeeze()
-
-            #print("Current Q values shape:", current_Q_values.shape)
-            #print("Expected Q values shape:", expected_Q_values.shape)
+                max_next_Q_values = self.model(next_states).max(1)[0]
+                
+                # Ensure all components are 1D tensors of shape [batch_size(32)]
+                max_next_Q_values = max_next_Q_values.squeeze()
+                rewards = rewards.squeeze()
+                dones = dones.squeeze()
+                
+                # Compute expected Q values
+                expected_Q_values = rewards + (self.gamma * max_next_Q_values * (1 - dones))
 
             
+            
+            # Ensure expected_Q_values is a 1D tensor of shape [batch_size(32)]
+            expected_Q_values = expected_Q_values.squeeze()
+
+            # Check if the shapes of current_Q_values and expected_Q_values match
+            assert current_Q_values.shape == expected_Q_values.shape, f"Shape mismatch: {current_Q_values.shape} vs {expected_Q_values.shape}"
+
+            # Calculate the loss using the Smooth L1 Loss
             loss = loss_fn(current_Q_values, expected_Q_values.detach())
 
-            
+            # Zero the gradients, perform backpropagation, and update the model's weights
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
 
-            
+            # If using a target network, update it with the main model's weights
             if self.use_target_net:
                 self._update_target_model()
 
-            
+            # Accumulate the loss
             total_loss += loss.item()
 
-        
+        # Calculate the average loss over the specified number of games
         average_loss = total_loss / num_games
         return average_loss
 
 
     def save_model(self, file_path='', iteration=None):
+        # Define the file name for saving the main model
         model_file = f"{file_path}/model"
         if iteration is not None:
             model_file += f"_{iteration:04d}"
         model_file += ".pth"
 
+        # Save the state dictionary of the main model to the specified file
         torch.save(self.model.state_dict(), model_file)
+
+        # Check if a target network is used and save its state dictionary
         if self.use_target_net:
             target_model_file = f"{file_path}/target_model_{iteration:04d}.pth"
             torch.save(self.target_model.state_dict(), target_model_file)
 
     def load_model(self, file_path='', iteration=None):
+        # Define the file name for loading the main model
         model_file = f"{file_path}/model"
         if iteration is not None:
             model_file += f"_{iteration:04d}"
         model_file += ".pth"
 
+        # Load the state dictionary of the main model from the specified file
         self.model.load_state_dict(torch.load(model_file))
+        
+        # Check if a target network is used and load its state dictionary
         if self.use_target_net:
             target_model_file = f"{file_path}/target_model_{iteration:04d}.pth"
             self.target_model.load_state_dict(torch.load(target_model_file))
 
     def print_models(self):
+        # Print the architecture of the main model
         print("Mainmodel:")
         print(self.model)
+        
+        # Check if a target network is used and print its architecture
         if self.use_target_net:
             print("\nTargetnetwork:")
             print(self.target_model)
@@ -251,6 +286,7 @@ class DeepQLearningAgent(nn.Module):
         self.target_model.load_state_dict(self.model.state_dict())
 
     def compare_weights(self):
+        # Check if weights of main and target models are identical.
         for param_main, param_target in zip(self.model.parameters(), self.target_model.parameters()):
             if param_main.data.ne(param_target.data).sum() > 0:
                 return False
@@ -284,14 +320,17 @@ class DeepQLearningAgent(nn.Module):
         return action_probabilities
 
     def _point_to_row_col(self, point, board_size):
+        # Convert point index to row and column coordinates.
         row = point // board_size
         col = point % board_size
         return row, col
 
     def _row_col_to_point(self, row, col, board_size):
+        # Convert row and column coordinates to point index.
         return row * board_size + col
 
     def copy_weights_from_agent(self, agent_for_copy):
+         # Copy weights from another agent to this agent's models.
         self.model.load_state_dict(agent_for_copy.model.state_dict())
         if self.use_target_net:
             self.target_model.load_state_dict(agent_for_copy.target_model.state_dict())
